@@ -9,6 +9,7 @@ import (
 
 	"github.com/TeaOSLab/EdgeAPI/internal/configs"
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/dnsconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
 	_ "github.com/go-sql-driver/mysql"
@@ -164,7 +165,11 @@ func (this *SQLExecutor) checkUser(db *dbs.DB) error {
 		return err
 	}
 
-	_, err = db.Exec("INSERT INTO edgeUsers (`username`, `password`, `fullname`, `isOn`, `state`, `createdAt`, `clusterId`) VALUES (?, ?, ?, ?, ?, ?, ?)", "USER_"+rands.HexString(10), stringutil.Md5(rands.HexString(32)), "默认用户", 1, 1, time.Now().Unix(), clusterId)
+	password, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("INSERT INTO edgeUsers (`username`, `password`, `fullname`, `isOn`, `state`, `createdAt`, `clusterId`) VALUES (?, ?, ?, ?, ?, ?, ?)", "USER_"+rands.HexString(10), stringutil.Md5(password), "默认用户", 1, 1, time.Now().Unix(), clusterId)
 	return err
 }
 
@@ -186,8 +191,14 @@ func (this *SQLExecutor) checkAdminNode(db *dbs.DB) error {
 		return nil
 	}
 
-	var nodeId = rands.HexString(32)
-	var secret = rands.String(32)
+	nodeId, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
 	_, err = db.Exec("INSERT INTO edgeAPITokens (nodeId, secret, role) VALUES (?, ?, ?)", nodeId, secret, "admin")
 	if err != nil {
 		return err
@@ -214,8 +225,14 @@ func (this *SQLExecutor) checkUserNode(db *dbs.DB) error {
 		return nil
 	}
 
-	var nodeId = rands.HexString(32)
-	var secret = rands.String(32)
+	nodeId, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
 	_, err = db.Exec("INSERT INTO edgeAPITokens (nodeId, secret, role) VALUES (?, ?, ?)", nodeId, secret, "user")
 	if err != nil {
 		return err
@@ -245,8 +262,14 @@ func (this *SQLExecutor) checkCluster(db *dbs.DB) error {
 	}
 
 	// 创建默认集群
-	var uniqueId = rands.HexString(32)
-	var secret = rands.String(32)
+	uniqueId, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
 
 	var clusterDNSConfig = &dnsconfigs.ClusterDNSConfig{
 		NodesAutoSync:    true,

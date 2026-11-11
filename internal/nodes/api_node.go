@@ -31,6 +31,7 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/iplibrary"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
+	"github.com/TeaOSLab/EdgeCommon/pkg/rpcauth"
 	"github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
@@ -273,6 +274,10 @@ func (this *APINode) InstallSystemService() error {
 
 // 启动RPC监听
 func (this *APINode) listenRPC(listener net.Listener, tlsConfig *tls.Config) error {
+	if tlsConfig == nil && !rpcauth.PlaintextAllowed(listener.Addr().String()) {
+		_ = listener.Close()
+		return errors.New("plaintext RPC requires explicit migration mode or loopback-only mode")
+	}
 	var rpcServer *grpc.Server
 	var options = []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(512 << 20),
@@ -393,7 +398,7 @@ func (this *APINode) autoUpgrade() error {
 		// 如果是同样的版本，则直接认为是最新版本
 		var version = one.GetString("version")
 		if setup.CompareVersion(version, setup.ComposeSQLVersion()) >= 0 {
-			return nil
+			return setup.EnsureSecuritySchema(db)
 		}
 	}
 
@@ -428,16 +433,7 @@ func (this *APINode) setupDB() error {
 		return nil
 	}
 
-	// 设置Innodb事务提交模式
-	{
-		result, err := db.FindOne("SHOW VARIABLES WHERE variable_name='innodb_flush_log_at_trx_commit'")
-		if err == nil && result != nil {
-			var oldValue = result.GetInt("Value")
-			if oldValue == 1 {
-				_, _ = db.Exec("SET GLOBAL innodb_flush_log_at_trx_commit=2")
-			}
-		}
-	}
+	// Preserve the database administrator's transaction durability settings.
 
 	// 调整预处理语句数量
 	_ = dbutils.SetGlobalVarMin(db, "max_prepared_stmt_count", 65535)
@@ -520,20 +516,8 @@ func (this *APINode) listenPorts(apiNode *models.APINode) (isListening bool) {
 
 				listener, err := net.Listen("tcp", addr)
 				if err != nil {
-					remotelogs.Error("API_NODE", "listening '"+addr+"' failed: "+err.Error()+", we will try to listen port only")
-
-					// 试着只监听端口
-					_, port, err := net.SplitHostPort(addr)
-					if err != nil {
-						continue
-					}
-					remotelogs.Println("API_NODE", "retry listening port ':"+port+"' only ...")
-					listener, err = net.Listen("tcp", ":"+port)
-					if err != nil {
-						remotelogs.Error("API_NODE", "listening ':"+port+"' failed: "+err.Error())
-						continue
-					}
-					remotelogs.Println("API_NODE", "retry listening port ':"+port+"' only ok")
+					remotelogs.Error("API_NODE", "listening '"+addr+"' failed: "+err.Error())
+					continue
 				}
 				goman.New(func() {
 					err := this.listenRPC(listener, nil)
@@ -575,19 +559,8 @@ func (this *APINode) listenPorts(apiNode *models.APINode) (isListening bool) {
 
 				listener, err := net.Listen("tcp", addr)
 				if err != nil {
-					remotelogs.Error("API_NODE", "listening '"+addr+"' failed: "+err.Error()+", we will try to listen port only")
-					// 试着只监听端口
-					_, port, err := net.SplitHostPort(addr)
-					if err != nil {
-						continue
-					}
-					remotelogs.Println("API_NODE", "retry listening port ':"+port+"' only ...")
-					listener, err = net.Listen("tcp", ":"+port)
-					if err != nil {
-						remotelogs.Error("API_NODE", "listening ':"+port+"' failed: "+err.Error())
-						continue
-					}
-					remotelogs.Println("API_NODE", "retry listening port ':"+port+"' only ok")
+					remotelogs.Error("API_NODE", "listening '"+addr+"' failed: "+err.Error())
+					continue
 				}
 				goman.New(func() {
 					err := this.listenRPC(listener, &tls.Config{

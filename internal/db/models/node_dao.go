@@ -14,6 +14,7 @@ import (
 	dbutils "github.com/TeaOSLab/EdgeAPI/internal/db/utils"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils/numberutils"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils/sizes"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils/ttlcache"
@@ -28,7 +29,6 @@ import (
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
 	"github.com/iwind/TeaGo/maps"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
 	timeutil "github.com/iwind/TeaGo/utils/time"
 )
@@ -149,7 +149,10 @@ func (this *NodeDAO) CreateNode(tx *dbs.Tx, adminId int64, name string, clusterI
 		return 0, err
 	}
 
-	secret := rands.String(32)
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return 0, err
+	}
 
 	// 保存API Token
 	err = SharedApiTokenDAO.CreateAPIToken(tx, uniqueId, secret, nodeconfigs.NodeRoleNode)
@@ -1956,7 +1959,10 @@ func (this *NodeDAO) FindNodeVersion(tx *dbs.Tx, nodeId int64) (int64, error) {
 // GenUniqueId 生成唯一ID
 func (this *NodeDAO) GenUniqueId(tx *dbs.Tx) (string, error) {
 	for {
-		uniqueId := rands.HexString(32)
+		uniqueId, err := cryptoutils.RandomHex(32)
+		if err != nil {
+			return "", err
+		}
 		ok, err := this.Query(tx).
 			Attr("uniqueId", uniqueId).
 			Exist()

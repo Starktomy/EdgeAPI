@@ -10,13 +10,13 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/configs"
 	"github.com/TeaOSLab/EdgeAPI/internal/remotelogs"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
 	"github.com/iwind/TeaGo/maps"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
 )
 
@@ -129,7 +129,10 @@ func (this *APINodeDAO) CreateAPINode(tx *dbs.Tx, name string, description strin
 	if err != nil {
 		return 0, err
 	}
-	secret := rands.String(32)
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return 0, err
+	}
 	err = NewApiTokenDAO().CreateAPIToken(tx, uniqueId, secret, nodeconfigs.NodeRoleAPI)
 	if err != nil {
 		return
@@ -504,7 +507,10 @@ func (this *APINodeDAO) NotifyUpdate(tx *dbs.Tx, apiNodeId int64) error {
 // 生成唯一ID
 func (this *APINodeDAO) genUniqueId(tx *dbs.Tx) (string, error) {
 	for {
-		uniqueId := rands.HexString(32)
+		uniqueId, err := cryptoutils.RandomHex(32)
+		if err != nil {
+			return "", err
+		}
 		ok, err := this.Query(tx).
 			Attr("uniqueId", uniqueId).
 			Exist()

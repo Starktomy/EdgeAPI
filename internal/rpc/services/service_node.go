@@ -399,13 +399,9 @@ func (this *NodeService) ListEnabledNodesMatch(ctx context.Context, req *pb.List
 
 // FindAllEnabledNodesWithNodeClusterId 查找一个集群下的所有节点
 func (this *NodeService) FindAllEnabledNodesWithNodeClusterId(ctx context.Context, req *pb.FindAllEnabledNodesWithNodeClusterIdRequest) (*pb.FindAllEnabledNodesWithNodeClusterIdResponse, error) {
-	_, userId, err := this.ValidateAdminAndUser(ctx, false)
+	_, err := this.ValidateAdmin(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	if userId > 0 {
-		// TODO 检查权限
 	}
 
 	var tx = this.NullTx()

@@ -27,7 +27,7 @@ type AdminService struct {
 
 // LoginAdmin 登录
 func (this *AdminService) LoginAdmin(ctx context.Context, req *pb.LoginAdminRequest) (*pb.LoginAdminResponse, error) {
-	_, _, _, err := rpcutils.ValidateRequest(ctx)
+	_, _, _, err := rpcutils.ValidateRequest(ctx, rpcutils.UserTypeAdmin)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (this *AdminService) FindEnabledAdmin(ctx context.Context, req *pb.FindEnab
 // CreateOrUpdateAdmin 创建或修改管理员
 func (this *AdminService) CreateOrUpdateAdmin(ctx context.Context, req *pb.CreateOrUpdateAdminRequest) (*pb.CreateOrUpdateAdminResponse, error) {
 	// 校验请求
-	_, _, _, err := rpcutils.ValidateRequest(ctx, rpcutils.UserTypeAdmin, rpcutils.UserTypeAPI)
+	err := this.validateAdminAccountMutation(ctx, 0, false)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +262,7 @@ func (this *AdminService) CreateOrUpdateAdmin(ctx context.Context, req *pb.Creat
 // UpdateAdminInfo 修改管理员信息
 func (this *AdminService) UpdateAdminInfo(ctx context.Context, req *pb.UpdateAdminInfoRequest) (*pb.RPCSuccess, error) {
 	// 校验请求
-	_, _, _, err := rpcutils.ValidateRequest(ctx, rpcutils.UserTypeAdmin, rpcutils.UserTypeAPI)
+	err := this.validateAdminAccountMutation(ctx, req.AdminId, true)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +279,7 @@ func (this *AdminService) UpdateAdminInfo(ctx context.Context, req *pb.UpdateAdm
 // UpdateAdminLogin 修改管理员登录信息
 func (this *AdminService) UpdateAdminLogin(ctx context.Context, req *pb.UpdateAdminLoginRequest) (*pb.RPCSuccess, error) {
 	// 校验请求
-	_, _, _, err := rpcutils.ValidateRequest(ctx, rpcutils.UserTypeAdmin, rpcutils.UserTypeAPI)
+	err := this.validateAdminAccountMutation(ctx, req.AdminId, true)
 	if err != nil {
 		return nil, err
 	}
@@ -351,12 +351,10 @@ func (this *AdminService) FindAllAdminModules(ctx context.Context, req *pb.FindA
 
 // CreateAdmin 创建管理员
 func (this *AdminService) CreateAdmin(ctx context.Context, req *pb.CreateAdminRequest) (*pb.CreateAdminResponse, error) {
-	_, err := this.ValidateAdmin(ctx)
+	_, err := this.ValidateSuperAdmin(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// TODO 检查权限
 
 	var tx = this.NullTx()
 
@@ -370,12 +368,10 @@ func (this *AdminService) CreateAdmin(ctx context.Context, req *pb.CreateAdminRe
 
 // UpdateAdmin 修改管理员
 func (this *AdminService) UpdateAdmin(ctx context.Context, req *pb.UpdateAdminRequest) (*pb.RPCSuccess, error) {
-	_, err := this.ValidateAdmin(ctx)
+	_, err := this.ValidateSuperAdmin(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// TODO 检查权限
 
 	var tx = this.NullTx()
 
@@ -477,7 +473,7 @@ func (this *AdminService) ListEnabledAdmins(ctx context.Context, req *pb.ListEna
 
 // DeleteAdmin 删除管理员
 func (this *AdminService) DeleteAdmin(ctx context.Context, req *pb.DeleteAdminRequest) (*pb.RPCSuccess, error) {
-	_, err := this.ValidateAdmin(ctx)
+	_, err := this.ValidateSuperAdmin(ctx)
 	if err != nil {
 		return nil, err
 	}

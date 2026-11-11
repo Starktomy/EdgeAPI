@@ -225,6 +225,32 @@ func (this *HTTPHeaderDAO) UpdateHeader(tx *dbs.Tx, headerId int64, name string,
 	return this.NotifyUpdate(tx, headerId)
 }
 
+// CheckUserHeader authorizes both unbound headers created by a user and legacy
+// administrator-owned headers attached to a web configuration they own.
+func (this *HTTPHeaderDAO) CheckUserHeader(tx *dbs.Tx, userId int64, headerId int64) error {
+	if userId <= 0 || headerId <= 0 {
+		return ErrNotFound
+	}
+	header, err := this.FindEnabledHTTPHeader(tx, headerId)
+	if err != nil {
+		return err
+	}
+	if header == nil {
+		return ErrNotFound
+	}
+	if header.UserId > 0 {
+		if int64(header.UserId) != userId {
+			return ErrNotFound
+		}
+		return nil
+	}
+	policyId, err := SharedHTTPHeaderPolicyDAO.FindHeaderPolicyIdWithHeaderId(tx, headerId)
+	if err != nil {
+		return err
+	}
+	return SharedHTTPHeaderPolicyDAO.CheckUserHeaderPolicy(tx, userId, policyId)
+}
+
 // ComposeHeaderConfig 组合Header配置
 func (this *HTTPHeaderDAO) ComposeHeaderConfig(tx *dbs.Tx, headerId int64) (*shared.HTTPHeaderConfig, error) {
 	header, err := this.FindEnabledHTTPHeader(tx, headerId)

@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"strings"
 	"time"
@@ -10,10 +11,13 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models/stats"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
 	rpcutils "github.com/TeaOSLab/EdgeAPI/internal/rpc/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/statbatches"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils/regexputils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/rpc/pb"
 	"github.com/iwind/TeaGo/dbs"
 	timeutil "github.com/iwind/TeaGo/utils/time"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 // ServerDailyStatService 服务统计相关服务
@@ -27,81 +31,88 @@ func (this *ServerDailyStatService) UploadServerDailyStats(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-
-	var tx = this.NullTx()
-
-	// 保存统计数据
-	err = models.SharedServerDailyStatDAO.SaveStats(tx, req.Stats)
-	if err != nil {
+	if err := validateTrafficUpload(req, time.Now()); err != nil {
 		return nil, err
 	}
 
-	var clusterId int64
-	switch role {
-	case rpcutils.UserTypeDNS:
-		clusterId, err = models.SharedNSNodeDAO.FindNodeClusterId(tx, nodeId)
-		if err != nil {
-			return nil, err
-		}
+	db, err := dbs.Default()
+	if err != nil {
+		return nil, err
 	}
-
-	// 写入其他统计表
-	// TODO 将来改成每小时入库一次
-	for _, stat := range req.Stats {
-		if role == rpcutils.UserTypeNode {
-			clusterId, err = models.SharedServerDAO.FindServerClusterId(tx, stat.ServerId)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		// 总体流量（按天）
-		err = stats.SharedTrafficDailyStatDAO.IncreaseDailyStat(tx, timeutil.FormatTime("Ymd", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+	md, _ := metadata.FromIncomingContext(ctx)
+	batchID := ""
+	if values := md.Get(statbatches.MetadataKey); len(values) > 0 {
+		batchID = values[0]
+	}
+	payload, err := (proto.MarshalOptions{Deterministic: true}).Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	err = statbatches.Apply(ctx, db.Raw(), role, nodeId, batchID, payload, func(raw *sql.Tx) error {
+		tx := dbs.NewTx(db, raw)
+		req, clusters, err := authorizeTrafficUpload(tx, role, nodeId, req)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		// 总体统计（按小时）
-		err = stats.SharedTrafficHourlyStatDAO.IncreaseHourlyStat(tx, timeutil.FormatTime("YmdH", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+		// 保存统计数据
+		err = models.SharedServerDailyStatDAO.SaveStats(tx, req.Stats)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		// 节点流量
-		if nodeId > 0 {
-			err = models.SharedNodeTrafficDailyStatDAO.IncreaseDailyStat(tx, clusterId, role, nodeId, timeutil.FormatTime("Ymd", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+		// 写入其他统计表
+		// TODO 将来改成每小时入库一次
+		for _, stat := range req.Stats {
+			clusterId := clusters[stat.ServerId]
+
+			// 总体流量（按天）
+			err = stats.SharedTrafficDailyStatDAO.IncreaseDailyStat(tx, timeutil.FormatTime("Ymd", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
 			if err != nil {
-				return nil, err
+				return err
 			}
 
-			err = stats.SharedNodeTrafficHourlyStatDAO.IncreaseHourlyStat(tx, clusterId, role, nodeId, timeutil.FormatTime("YmdH", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+			// 总体统计（按小时）
+			err = stats.SharedTrafficHourlyStatDAO.IncreaseHourlyStat(tx, timeutil.FormatTime("YmdH", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
 			if err != nil {
-				return nil, err
+				return err
 			}
 
-			// 集群流量
-			if clusterId > 0 {
-				err = stats.SharedNodeClusterTrafficDailyStatDAO.IncreaseDailyStat(tx, clusterId, timeutil.FormatTime("Ymd", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+			// 节点流量
+			if nodeId > 0 {
+				err = models.SharedNodeTrafficDailyStatDAO.IncreaseDailyStat(tx, clusterId, role, nodeId, timeutil.FormatTime("Ymd", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
 				if err != nil {
-					return nil, err
+					return err
+				}
+
+				err = stats.SharedNodeTrafficHourlyStatDAO.IncreaseHourlyStat(tx, clusterId, role, nodeId, timeutil.FormatTime("YmdH", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+				if err != nil {
+					return err
+				}
+
+				// 集群流量
+				if clusterId > 0 {
+					err = stats.SharedNodeClusterTrafficDailyStatDAO.IncreaseDailyStat(tx, clusterId, timeutil.FormatTime("Ymd", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
-	}
 
-	// 域名统计
-	for _, stat := range req.DomainStats {
-		if role == rpcutils.UserTypeNode {
-			clusterId, err = models.SharedServerDAO.FindServerClusterId(tx, stat.ServerId)
+		// 域名统计
+		for _, stat := range req.DomainStats {
+			clusterId := clusters[stat.ServerId]
+
+			err := stats.SharedServerDomainHourlyStatDAO.IncreaseHourlyStat(tx, clusterId, nodeId, stat.ServerId, stat.Domain, timeutil.FormatTime("YmdH", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
-
-		err := stats.SharedServerDomainHourlyStatDAO.IncreaseHourlyStat(tx, clusterId, nodeId, stat.ServerId, stat.Domain, timeutil.FormatTime("YmdH", stat.CreatedAt), stat.Bytes, stat.CachedBytes, stat.CountRequests, stat.CountCachedRequests, stat.CountAttackRequests, stat.AttackBytes)
-		if err != nil {
-			return nil, err
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return this.Success()

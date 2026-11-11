@@ -7,12 +7,12 @@ import (
 
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/maps"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
 )
 
@@ -157,7 +157,10 @@ func (this *UserNodeDAO) CreateUserNode(tx *dbs.Tx, name string, description str
 	if err != nil {
 		return 0, err
 	}
-	secret := rands.String(32)
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return 0, err
+	}
 	err = NewApiTokenDAO().CreateAPIToken(tx, uniqueId, secret, nodeconfigs.NodeRoleUser)
 	if err != nil {
 		return
@@ -245,7 +248,10 @@ func (this *UserNodeDAO) FindEnabledUserNodeIdWithUniqueId(tx *dbs.Tx, uniqueId 
 // GenUniqueId 生成唯一ID
 func (this *UserNodeDAO) GenUniqueId(tx *dbs.Tx) (string, error) {
 	for {
-		uniqueId := rands.HexString(32)
+		uniqueId, err := cryptoutils.RandomHex(32)
+		if err != nil {
+			return "", err
+		}
 		ok, err := this.Query(tx).
 			Attr("uniqueId", uniqueId).
 			Exist()

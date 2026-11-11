@@ -3,11 +3,10 @@ package models
 import (
 	"time"
 
-	"github.com/TeaOSLab/EdgeAPI/internal/errors"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/principals"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
-	"github.com/iwind/TeaGo/rands"
 )
 
 type APIAccessTokenDAO dbs.DAO
@@ -33,16 +32,8 @@ func init() {
 
 // GenerateAccessToken 生成AccessToken
 func (this *APIAccessTokenDAO) GenerateAccessToken(tx *dbs.Tx, adminId int64, userId int64) (token string, expiresAt int64, err error) {
-	if adminId <= 0 && userId <= 0 {
-		err = errors.New("either 'adminId' or 'userId' should not be zero")
+	if err = principals.ValidateSubject(adminId, userId); err != nil {
 		return
-	}
-
-	if adminId > 0 {
-		userId = 0
-	}
-	if userId > 0 {
-		adminId = 0
 	}
 
 	// 查询以前的
@@ -54,7 +45,10 @@ func (this *APIAccessTokenDAO) GenerateAccessToken(tx *dbs.Tx, adminId int64, us
 		return "", 0, err
 	}
 
-	token = rands.String(128) // TODO 增强安全性，将来使用 base64_encode(encrypt(salt+random)) 算法来代替
+	token, err = principals.RandomCredential(96)
+	if err != nil {
+		return "", 0, err
+	}
 	expiresAt = time.Now().Unix() + 7200
 
 	var op = NewAPIAccessTokenOperator()

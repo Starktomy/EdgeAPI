@@ -191,16 +191,9 @@ func (this *NodeClusterService) DeleteNodeCluster(ctx context.Context, req *pb.D
 
 // FindEnabledNodeCluster 查找单个集群
 func (this *NodeClusterService) FindEnabledNodeCluster(ctx context.Context, req *pb.FindEnabledNodeClusterRequest) (*pb.FindEnabledNodeClusterResponse, error) {
-	_, userId, err := this.ValidateAdminAndUser(ctx, false)
+	_, err := this.ValidateAdmin(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	if userId > 0 {
-		// TODO 检查用户是否有权限
-
-		// 禁止通过REST访问
-		// TODO
 	}
 
 	var tx = this.NullTx()

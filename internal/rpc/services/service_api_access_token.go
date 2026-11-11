@@ -2,15 +2,18 @@ package services
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/principals"
 	"github.com/TeaOSLab/EdgeCommon/pkg/rpc/pb"
 )
 
 // APIAccessTokenService AccessToken相关服务
 type APIAccessTokenService struct {
 	BaseService
+	findAccessKey func(string) (*models.UserAccessKey, error)
 }
 
 // GetAPIAccessToken 获取AccessToken
@@ -21,14 +24,24 @@ func (this *APIAccessTokenService) GetAPIAccessToken(ctx context.Context, req *p
 
 	var tx = this.NullTx()
 
-	accessKey, err := models.SharedUserAccessKeyDAO.FindAccessKeyWithUniqueId(tx, req.AccessKeyId)
+	findAccessKey := this.findAccessKey
+	if findAccessKey == nil {
+		findAccessKey = func(id string) (*models.UserAccessKey, error) {
+			return models.SharedUserAccessKeyDAO.FindAccessKeyWithUniqueId(tx, id)
+		}
+	}
+	accessKey, err := findAccessKey(req.AccessKeyId)
 	if err != nil {
 		return nil, err
 	}
 	if accessKey == nil {
 		return nil, errors.New("access key not found")
 	}
-	if accessKey.Secret != req.AccessKey {
+	if subtle.ConstantTimeCompare([]byte(accessKey.Secret), []byte(req.AccessKey)) != 1 {
+		return nil, errors.New("access key not found")
+	}
+	// Reject historical mixed keys instead of silently preferring AdminId.
+	if err = principals.ValidateRoleSubject(req.Type, int64(accessKey.AdminId), int64(accessKey.UserId)); err != nil {
 		return nil, errors.New("access key not found")
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/rpc/services"
 	rpcutils "github.com/TeaOSLab/EdgeAPI/internal/rpc/utils"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils/sizes"
+	"github.com/TeaOSLab/EdgeCommon/pkg/rpcauth"
 	"github.com/iwind/TeaGo/maps"
 )
 
@@ -27,9 +29,13 @@ var restServicesMap = map[string]reflect.Value{
 type RestServer struct{}
 
 func (this *RestServer) Listen(listener net.Listener) error {
+	if !rpcauth.PlaintextAllowed(listener.Addr().String()) {
+		_ = listener.Close()
+		return fmt.Errorf("plaintext REST requires explicit migration mode or loopback-only mode")
+	}
 	var mux = http.NewServeMux()
 	mux.HandleFunc("/", this.handle)
-	var server = &http.Server{}
+	var server = &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	server.Handler = mux
 	return server.Serve(listener)
 }
@@ -37,7 +43,7 @@ func (this *RestServer) Listen(listener net.Listener) error {
 func (this *RestServer) ListenHTTPS(listener net.Listener, tlsConfig *tls.Config) error {
 	var mux = http.NewServeMux()
 	mux.HandleFunc("/", this.handle)
-	server := &http.Server{}
+	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	server.Handler = mux
 	server.TLSConfig = tlsConfig
 	return server.ServeTLS(listener, "", "")

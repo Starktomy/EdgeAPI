@@ -6,12 +6,12 @@ import (
 	dbutils "github.com/TeaOSLab/EdgeAPI/internal/db/utils"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/reporterconfigs"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
 )
 
@@ -91,7 +91,10 @@ func (this *ReportNodeDAO) CreateReportNode(tx *dbs.Tx, name string, location st
 		return 0, err
 	}
 
-	secret := rands.String(32)
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return 0, err
+	}
 
 	// 保存API Token
 	err = SharedApiTokenDAO.CreateAPIToken(tx, uniqueId, secret, nodeconfigs.NodeRoleReport)
@@ -222,7 +225,10 @@ func (this *ReportNodeDAO) ListEnabledReportNodes(tx *dbs.Tx, groupId int64, key
 // GenUniqueId 生成唯一ID
 func (this *ReportNodeDAO) GenUniqueId(tx *dbs.Tx) (string, error) {
 	for {
-		uniqueId := rands.HexString(32)
+		uniqueId, err := cryptoutils.RandomHex(32)
+		if err != nil {
+			return "", err
+		}
 		ok, err := this.Query(tx).
 			Attr("uniqueId", uniqueId).
 			Exist()

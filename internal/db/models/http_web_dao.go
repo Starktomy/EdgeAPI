@@ -578,6 +578,15 @@ func (this *HTTPWebDAO) ComposeWebConfig(tx *dbs.Tx, webId int64, isLocationOrGr
 
 // CreateWeb 创建Web配置
 func (this *HTTPWebDAO) CreateWeb(tx *dbs.Tx, adminId int64, userId int64, rootJSON []byte) (int64, error) {
+	if userId > 0 && len(rootJSON) > 0 {
+		var root map[string]json.RawMessage
+		if err := json.Unmarshal(rootJSON, &root); err != nil {
+			return 0, err
+		}
+		if len(root) > 0 {
+			return 0, errors.New("local filesystem roots require administrator permission")
+		}
+	}
 	var op = NewHTTPWebOperator()
 	op.State = HTTPWebStateEnabled
 	op.AdminId = adminId
@@ -1214,6 +1223,19 @@ func (this *HTTPWebDAO) FindWebServerGroupId(tx *dbs.Tx, webId int64) (groupId i
 func (this *HTTPWebDAO) CheckUserWeb(tx *dbs.Tx, userId int64, webId int64) error {
 	if userId <= 0 || webId <= 0 {
 		return ErrNotFound
+	}
+	web, err := this.FindEnabledHTTPWeb(tx, webId)
+	if err != nil {
+		return err
+	}
+	if web == nil {
+		return ErrNotFound
+	}
+	if web.UserId > 0 {
+		if int64(web.UserId) != userId {
+			return ErrNotFound
+		}
+		return nil
 	}
 
 	serverId, err := this.FindWebServerId(tx, webId)

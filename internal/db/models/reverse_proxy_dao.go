@@ -3,7 +3,6 @@ package models
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
@@ -221,7 +220,7 @@ func (this *ReverseProxyDAO) CreateReverseProxy(tx *dbs.Tx, adminId int64, userI
 	if len(primaryOriginRefsJSON) > 0 {
 		err := json.Unmarshal(primaryOriginRefsJSON, &primaryOriginRefs)
 		if err != nil {
-			return 0, fmt.Errorf("decode 'primaryOriginRefs' failed: " + err.Error())
+			return 0, errors.New("decode 'primaryOriginRefs' failed: " + err.Error())
 		}
 	}
 
@@ -229,7 +228,7 @@ func (this *ReverseProxyDAO) CreateReverseProxy(tx *dbs.Tx, adminId int64, userI
 	if len(backupOriginRefsJSON) > 0 {
 		err := json.Unmarshal(backupOriginRefsJSON, &backupOriginRefs)
 		if err != nil {
-			return 0, fmt.Errorf("decode 'backupOriginRefs' failed: " + err.Error())
+			return 0, errors.New("decode 'backupOriginRefs' failed: " + err.Error())
 		}
 	}
 
@@ -422,7 +421,7 @@ func (this *ReverseProxyDAO) UpdateReverseProxyPrimaryOrigins(tx *dbs.Tx, revers
 		var originRefs []*serverconfigs.OriginRef
 		err := json.Unmarshal(originRefsJSON, &originRefs)
 		if err != nil {
-			return fmt.Errorf("decode 'originRefs' failed: " + err.Error())
+			return errors.New("decode 'originRefs' failed: " + err.Error())
 		}
 		for _, originRef := range originRefs {
 			err = SharedOriginDAO.UpdateOriginReverseProxyId(tx, originRef.OriginId, reverseProxyId)
@@ -457,7 +456,7 @@ func (this *ReverseProxyDAO) UpdateReverseProxyBackupOrigins(tx *dbs.Tx, reverse
 		var originRefs []*serverconfigs.OriginRef
 		err := json.Unmarshal(originRefsJSON, &originRefs)
 		if err != nil {
-			return fmt.Errorf("decode 'originRefs' failed: " + err.Error())
+			return errors.New("decode 'originRefs' failed: " + err.Error())
 		}
 		for _, originRef := range originRefs {
 			err = SharedOriginDAO.UpdateOriginReverseProxyId(tx, originRef.OriginId, reverseProxyId)

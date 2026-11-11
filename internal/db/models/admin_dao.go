@@ -3,11 +3,11 @@ package models
 import (
 	dbutils "github.com/TeaOSLab/EdgeAPI/internal/db/utils"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
+	"github.com/TeaOSLab/EdgeAPI/internal/passwords"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/types"
-	stringutil "github.com/iwind/TeaGo/utils/string"
 )
 
 const (
@@ -100,18 +100,42 @@ func (this *AdminDAO) FindAdminFullname(tx *dbs.Tx, adminId int64) (string, erro
 }
 
 // CheckAdminPassword 检查用户名、密码
-func (this *AdminDAO) CheckAdminPassword(tx *dbs.Tx, username string, encryptedPassword string) (int64, error) {
-	if len(username) == 0 || len(encryptedPassword) == 0 {
+func (this *AdminDAO) CheckAdminPassword(tx *dbs.Tx, username string, suppliedPassword string) (int64, error) {
+	if len(username) == 0 || len(username) > 256 || len(suppliedPassword) == 0 {
 		return 0, nil
 	}
-	return this.Query(tx).
+	one, err := this.Query(tx).
 		Attr("username", username).
-		Attr("password", encryptedPassword).
 		Attr("state", AdminStateEnabled).
 		Attr("isOn", true).
 		Attr("canLogin", 1).
-		ResultPk().
-		FindInt64Col(0)
+		Result("id", "password").
+		Reuse(false).
+		Find()
+	if err != nil || one == nil {
+		return 0, err
+	}
+	admin := one.(*Admin)
+	ok, replacement, err := passwords.VerifyLogin(admin.Password, suppliedPassword)
+	if err != nil || !ok {
+		return 0, err
+	}
+	if replacement != "" {
+		// A concurrent password reset must win over migration of an old value.
+		changed, err := this.Query(tx).
+			Pk(admin.Id).
+			Attr("password", admin.Password).
+			State(AdminStateEnabled).
+			Attr("isOn", true).
+			Attr("canLogin", 1).
+			Set("password", replacement).
+			Reuse(false).
+			Update()
+		if err != nil || changed != 1 {
+			return 0, err
+		}
+	}
+	return int64(admin.Id), nil
 }
 
 // FindAdminIdWithUsername 根据用户名查询管理员ID
@@ -150,19 +174,27 @@ func (this *AdminDAO) UpdateAdminPassword(tx *dbs.Tx, adminId int64, password st
 	}
 	var op = NewAdminOperator()
 	op.Id = adminId
-	op.Password = stringutil.Md5(password)
-	err := this.Save(tx, op)
+	hash, err := passwords.Hash(password)
+	if err != nil {
+		return err
+	}
+	op.Password = hash
+	err = this.Save(tx, op)
 	return err
 }
 
 // CreateAdmin 创建管理员
 func (this *AdminDAO) CreateAdmin(tx *dbs.Tx, username string, canLogin bool, password string, fullname string, isSuper bool, modulesJSON []byte) (int64, error) {
+	hash, err := passwords.Hash(password)
+	if err != nil {
+		return 0, err
+	}
 	var op = NewAdminOperator()
 	op.IsOn = true
 	op.State = AdminStateEnabled
 	op.Username = username
 	op.CanLogin = canLogin
-	op.Password = stringutil.Md5(password)
+	op.Password = hash
 	op.Fullname = fullname
 	op.IsSuper = isSuper
 	if len(modulesJSON) > 0 {
@@ -170,7 +202,7 @@ func (this *AdminDAO) CreateAdmin(tx *dbs.Tx, username string, canLogin bool, pa
 	} else {
 		op.Modules = "[]"
 	}
-	err := this.Save(tx, op)
+	err = this.Save(tx, op)
 	if err != nil {
 		return 0, err
 	}
@@ -200,7 +232,11 @@ func (this *AdminDAO) UpdateAdmin(tx *dbs.Tx, adminId int64, username string, ca
 	op.Username = username
 	op.CanLogin = canLogin
 	if len(password) > 0 {
-		op.Password = stringutil.Md5(password)
+		hash, err := passwords.Hash(password)
+		if err != nil {
+			return err
+		}
+		op.Password = hash
 	}
 	op.IsSuper = isSuper
 	if len(modulesJSON) > 0 {
@@ -247,7 +283,11 @@ func (this *AdminDAO) UpdateAdminLogin(tx *dbs.Tx, adminId int64, username strin
 	op.Id = adminId
 	op.Username = username
 	if len(password) > 0 {
-		op.Password = stringutil.Md5(password)
+		hash, err := passwords.Hash(password)
+		if err != nil {
+			return err
+		}
+		op.Password = hash
 	}
 	err := this.Save(tx, op)
 	return err

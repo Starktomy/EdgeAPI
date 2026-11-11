@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 
 	teaconst "github.com/TeaOSLab/EdgeAPI/internal/const"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/securefs"
 	"github.com/iwind/TeaGo/Tea"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 var sharedAPIConfig *APIConfig = nil
@@ -44,6 +45,7 @@ func SharedAPIConfig() (*APIConfig, error) {
 		var data []byte
 		var err error
 		var firstErr error
+		var found bool
 		for _, path := range paths {
 			data, err = os.ReadFile(path)
 			if err != nil {
@@ -51,13 +53,14 @@ func SharedAPIConfig() (*APIConfig, error) {
 					firstErr = err
 				}
 			} else {
+				found = true
 				if path == localFile {
 					isFromLocal = true
 				}
 				break
 			}
 		}
-		if firstErr != nil {
+		if !found {
 			return nil, firstErr
 		}
 
@@ -69,7 +72,9 @@ func SharedAPIConfig() (*APIConfig, error) {
 
 		if !isFromLocal {
 			// 恢复文件
-			_ = os.WriteFile(localFile, data, 0666)
+			if err := securefs.WriteFile(localFile, data); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -89,7 +94,9 @@ func SharedAPIConfig() (*APIConfig, error) {
 				if err == nil {
 					data, err := os.ReadFile(path)
 					if err == nil {
-						_ = os.WriteFile(dbConfigFile, data, 0666)
+						if err := securefs.WriteFile(dbConfigFile, data); err != nil {
+							return nil, err
+						}
 						break
 					}
 				}
@@ -120,25 +127,20 @@ func (this *APIConfig) WriteFile(path string) error {
 	}
 
 	// 生成备份文件
-	var filename = filepath.Base(path)
 	homeDir, _ := os.UserHomeDir()
 	var backupDirs = []string{"/etc/edge-api"}
 	if len(homeDir) > 0 {
 		backupDirs = append(backupDirs, homeDir+"/.edge-api")
 	}
-	for _, backupDir := range backupDirs {
-		stat, err := os.Stat(backupDir)
-		if err == nil && stat.IsDir() {
-			_ = os.WriteFile(backupDir+"/"+filename, data, 0666)
-		} else if err != nil && os.IsNotExist(err) {
-			err = os.Mkdir(backupDir, 0777)
-			if err == nil {
-				_ = os.WriteFile(backupDir+"/"+filename, data, 0666)
-			}
-		}
-	}
+	return writeAPIConfigFiles(path, data, backupDirs)
+}
 
-	return os.WriteFile(path, data, 0666)
+func writeAPIConfigFiles(path string, data []byte, backupDirs []string) error {
+	for _, backupDir := range backupDirs {
+		// Backups remain best effort when a runtime user cannot access /etc.
+		_ = securefs.WriteFile(filepath.Join(backupDir, filepath.Base(path)), data)
+	}
+	return securefs.WriteFile(path, data)
 }
 
 // ResetAPIConfig 重置配置

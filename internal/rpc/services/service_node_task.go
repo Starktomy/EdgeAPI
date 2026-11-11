@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
@@ -37,7 +38,7 @@ func (this *NodeTaskService) FindNodeTasks(ctx context.Context, req *pb.FindNode
 			Id:        int64(task.Id),
 			Type:      task.Type,
 			Version:   int64(task.Version),
-			IsPrimary: primaryNodeId == nodeId,
+			IsPrimary: atomic.LoadInt64(&primaryNodeId) == nodeId,
 			ServerId:  int64(task.ServerId),
 			UserId:    int64(task.UserId),
 		})
@@ -66,13 +67,13 @@ func (this *NodeTaskService) FindNodeTasks(ctx context.Context, req *pb.FindNode
 
 // ReportNodeTaskDone 报告同步任务结果
 func (this *NodeTaskService) ReportNodeTaskDone(ctx context.Context, req *pb.ReportNodeTaskDoneRequest) (*pb.RPCSuccess, error) {
-	_, _, err := this.ValidateNodeId(ctx, rpcutils.UserTypeNode, rpcutils.UserTypeDNS)
+	role, nodeId, err := this.ValidateNodeId(ctx, rpcutils.UserTypeNode, rpcutils.UserTypeDNS)
 	if err != nil {
 		return nil, err
 	}
 
 	var tx = this.NullTx()
-	err = models.SharedNodeTaskDAO.UpdateNodeTaskDone(tx, req.NodeTaskId, req.IsOk, req.Error)
+	err = models.SharedNodeTaskDAO.UpdateNodeTaskDoneForNode(tx, role, nodeId, req.NodeTaskId, req.IsOk, req.Error)
 	if err != nil {
 		return nil, err
 	}

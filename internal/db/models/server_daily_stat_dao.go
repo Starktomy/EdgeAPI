@@ -68,18 +68,14 @@ func (this *ServerDailyStatDAO) SaveStats(tx *dbs.Tx, stats []*pb.ServerDailySta
 		var timeTo = timeutil.FormatTime("His", stat.CreatedAt+5*60-1) // 5分钟
 
 		// 用户ID
-		var serverUserId = stat.UserId
-		if serverUserId == 0 {
-			var ok bool
-			serverUserId, ok = serverUserMap[stat.ServerId]
-			if !ok {
-				userId, err := SharedServerDAO.FindServerUserId(tx, stat.ServerId)
-				if err != nil {
-					return err
-				}
-				serverUserMap[stat.ServerId] = userId
-				serverUserId = userId
+		serverUserId, ok := serverUserMap[stat.ServerId]
+		if !ok {
+			userId, err := SharedServerDAO.FindServerUserId(tx, stat.ServerId)
+			if err != nil {
+				return err
 			}
+			serverUserMap[stat.ServerId] = userId
+			serverUserId = userId
 		}
 
 		_, _, err := this.Query(tx).
@@ -139,7 +135,6 @@ func (this *ServerDailyStatDAO) SaveStats(tx *dbs.Tx, stats []*pb.ServerDailySta
 
 	return nil
 }
-
 
 // SumCurrentDailyStat 查找当前时刻的数据统计
 func (this *ServerDailyStatDAO) SumCurrentDailyStat(tx *dbs.Tx, serverId int64) (*ServerDailyStat, error) {

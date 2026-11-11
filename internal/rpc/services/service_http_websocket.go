@@ -31,12 +31,16 @@ func (this *HTTPWebsocketService) CreateHTTPWebsocket(ctx context.Context, req *
 // 修改Websocket配置
 func (this *HTTPWebsocketService) UpdateHTTPWebsocket(ctx context.Context, req *pb.UpdateHTTPWebsocketRequest) (*pb.RPCSuccess, error) {
 	// 校验请求
-	_, _, err := this.ValidateAdminAndUser(ctx, true)
+	_, userId, err := this.ValidateAdminAndUser(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO 用户不能修改别人的WebSocket设置
+	if userId > 0 {
+		if err = this.authorizer().CheckUserWebsocket(userId, req.WebsocketId); err != nil {
+			return nil, err
+		}
+	}
 
 	var tx = this.NullTx()
 

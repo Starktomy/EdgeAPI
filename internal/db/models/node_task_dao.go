@@ -271,25 +271,51 @@ func (this *NodeTaskDAO) FindDoingNodeTasks(tx *dbs.Tx, role string, nodeId int6
 
 // UpdateNodeTaskDone 修改节点任务的完成状态
 func (this *NodeTaskDAO) UpdateNodeTaskDone(tx *dbs.Tx, taskId int64, isOk bool, errorMessage string) error {
+	return this.updateNodeTaskDone(tx, taskId, isOk, errorMessage, "", 0)
+}
+
+func (this *NodeTaskDAO) UpdateNodeTaskDoneForNode(tx *dbs.Tx, role string, nodeId int64, taskId int64, isOk bool, errorMessage string) error {
+	if (role != "node" && role != "dns") || nodeId <= 0 || taskId <= 0 {
+		return ErrNotFound
+	}
+	return this.updateNodeTaskDone(tx, taskId, isOk, errorMessage, role, nodeId)
+}
+
+func (this *NodeTaskDAO) updateNodeTaskDone(tx *dbs.Tx, taskId int64, isOk bool, errorMessage string, role string, nodeId int64) error {
+	queryForTask := func() *dbs.Query {
+		// Task acknowledgments are infrequent and must not share TeaGo's
+		// statement access timestamps, which are updated without synchronization.
+		query := this.Query(tx).Pk(taskId).Reuse(false)
+		if role != "" {
+			query.Attr("role", role).Attr("nodeId", nodeId)
+		}
+		return query
+	}
+	if role != "" {
+		exists, err := queryForTask().Exist()
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+	}
 	if isOk {
 		// 特殊任务删除
-		taskType, err := this.Query(tx).
-			Pk(taskId).
+		taskType, err := queryForTask().
 			Result("type").
 			FindStringCol("")
 		if err != nil {
 			return err
 		}
 		if strings.HasPrefix(taskType, NodeTaskTypeIPListDeleted+"@") {
-			return this.Query(tx).
-				Pk(taskId).
+			return queryForTask().
 				DeleteQuickly()
 		}
 	}
 
 	// 其他任务标记为完成
-	var query = this.Query(tx).
-		Pk(taskId)
+	var query = queryForTask()
 	if !isOk {
 		version, err := this.increaseVersion(tx)
 		if err != nil {

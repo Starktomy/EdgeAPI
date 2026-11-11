@@ -2,7 +2,7 @@
 
 package instances
 
-import "gopkg.in/yaml.v3"
+import "go.yaml.in/yaml/v3"
 
 type APIConfig struct {
 	RPCEndpoints     []string `yaml:"rpc.endpoints,flow,omitempty" json:"rpc.endpoints"`

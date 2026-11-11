@@ -185,6 +185,17 @@ func (this *HTTPWebsocketDAO) CloneWebsocket(tx *dbs.Tx, fromWebsocketId int64) 
 	return this.SaveInt64(tx, op)
 }
 
+func (this *HTTPWebsocketDAO) CheckUserWebsocket(tx *dbs.Tx, userId int64, websocketId int64) error {
+	if userId <= 0 || websocketId <= 0 {
+		return ErrNotFound
+	}
+	webId, err := SharedHTTPWebDAO.FindEnabledWebIdWithWebsocketId(tx, websocketId)
+	if err != nil {
+		return err
+	}
+	return SharedHTTPWebDAO.CheckUserWeb(tx, userId, webId)
+}
+
 // NotifyUpdate 通知更新
 func (this *HTTPWebsocketDAO) NotifyUpdate(tx *dbs.Tx, websocketId int64) error {
 	webId, err := SharedHTTPWebDAO.FindEnabledWebIdWithWebsocketId(tx, websocketId)

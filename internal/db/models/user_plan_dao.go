@@ -96,7 +96,9 @@ func (this *UserPlanDAO) FindUserPlanWithoutState(tx *dbs.Tx, userPlanId int64, 
 		}
 	}
 
-	result, err := this.Query(tx).
+	// TeaGo's reusable statement timestamps are not synchronized. Keep this
+	// billing lookup off that cache; cacheMap still coalesces repeated lookups.
+	result, err := this.Query(tx).Reuse(false).
 		Pk(userPlanId).
 		Find()
 	if result == nil {

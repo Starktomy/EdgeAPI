@@ -8,6 +8,7 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models/dns"
 	dbutils "github.com/TeaOSLab/EdgeAPI/internal/db/utils"
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/dnsconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
@@ -16,7 +17,6 @@ import (
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/maps"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
 )
 
@@ -133,7 +133,10 @@ func (this *NodeClusterDAO) CreateCluster(tx *dbs.Tx, adminId int64, name string
 		return 0, err
 	}
 
-	var secret = rands.String(32)
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return 0, err
+	}
 	err = SharedApiTokenDAO.CreateAPIToken(tx, uniqueId, secret, nodeconfigs.NodeRoleCluster)
 	if err != nil {
 		return 0, err
@@ -961,7 +964,10 @@ func (this *NodeClusterDAO) FindNodeClusterSystemServices(tx *dbs.Tx, clusterId 
 // GenUniqueId 生成唯一ID
 func (this *NodeClusterDAO) GenUniqueId(tx *dbs.Tx) (string, error) {
 	for {
-		uniqueId := rands.HexString(32)
+		uniqueId, err := cryptoutils.RandomHex(32)
+		if err != nil {
+			return "", err
+		}
 		ok, err := this.Query(tx).
 			Attr("uniqueId", uniqueId).
 			Exist()

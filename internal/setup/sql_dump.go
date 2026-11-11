@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
 	"github.com/iwind/TeaGo/maps"
@@ -177,27 +176,8 @@ func (this *SQLDump) Dump(db *dbs.DB, includingRecords bool) (result *SQLDumpRes
 
 // Apply 应用数据
 func (this *SQLDump) Apply(db *dbs.DB, newResult *SQLDumpResult, showLog bool) (ops []string, err error) {
-	// 设置Innodb事务提交模式
-	{
-		// 检查是否为root用户
-		config, _ := db.Config()
-		if config == nil {
-			return nil, nil
-		}
-		dsnConfig, err := mysql.ParseDSN(config.Dsn)
-		if err != nil || dsnConfig == nil {
-			return nil, err
-		}
-		if dsnConfig.User == "root" {
-			result, err := db.FindOne("SHOW VARIABLES WHERE variable_name='innodb_flush_log_at_trx_commit'")
-			if err == nil && result != nil {
-				var oldValue = result.GetInt("Value")
-				if oldValue == 1 {
-					_, _ = db.Exec("SET GLOBAL innodb_flush_log_at_trx_commit=2")
-				}
-			}
-		}
-	}
+	// Schema installation must preserve the database administrator's durability
+	// settings. In particular, never downgrade fsync-at-commit globally.
 
 	// 执行队列
 	var execQueue = make(chan *sqlItem, 256)

@@ -20,18 +20,20 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
 	"github.com/TeaOSLab/EdgeAPI/internal/installers/helpers"
 	"github.com/TeaOSLab/EdgeAPI/internal/setup"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	executils "github.com/TeaOSLab/EdgeAPI/internal/utils/exec"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/securefs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs/firewallconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/systemconfigs"
+	"github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 type Instance struct {
@@ -88,10 +90,10 @@ func (this *Instance) SetupDB() error {
 			time.Sleep(1 * time.Second)
 		}
 
-		_, err := db.Exec("USE `" + this.options.DB.Name + "`")
+		_, err := db.Exec("USE `" + strings.ReplaceAll(this.options.DB.Name, "`", "``") + "`")
 		if err != nil {
 			if models.CheckSQLErrCode(err, 1049) {
-				_, err = db.Exec("CREATE DATABASE `" + this.options.DB.Name + "` DEFAULT CHARSET utf8mb4")
+				_, err = db.Exec("CREATE DATABASE `" + strings.ReplaceAll(this.options.DB.Name, "`", "``") + "` DEFAULT CHARSET utf8mb4")
 				if err != nil {
 					return fmt.Errorf("create new database failed: %w", err)
 				}
@@ -156,8 +158,14 @@ func (this *Instance) SetupDB() error {
 			return err
 		}
 		if len(one) == 0 {
-			var nodeId = rands.HexString(32)
-			var secret = rands.String(32)
+			nodeId, err := cryptoutils.RandomHex(32)
+			if err != nil {
+				return err
+			}
+			secret, err := cryptoutils.RandomHex(32)
+			if err != nil {
+				return err
+			}
 			err = models.SharedApiTokenDAO.CreateAPIToken(tx, nodeId, secret, "admin")
 			if err != nil {
 				return fmt.Errorf("create admin node token failed: %w", err)
@@ -172,17 +180,20 @@ func (this *Instance) SetupDB() error {
 			return err
 		}
 		if len(one) == 0 {
-			var password = rands.String(16)
+			password, err := cryptoutils.RandomHex(32)
+			if err != nil {
+				return err
+			}
 			// 保存密码到文件
 			var dir = this.options.WorkDir + "/usr/local/goedge"
 			_, err = os.Stat(dir)
 			if err != nil {
-				err = os.MkdirAll(dir, 0777)
+				err = securefs.PrivateDir(dir)
 				if err != nil {
 					return fmt.Errorf("create directory '"+dir+"' failed: %w", err)
 				}
 			}
-			err = os.WriteFile(dir+"/password.txt", []byte("Admin Password: "+password+"\n"), 0666)
+			err = securefs.WriteFile(dir+"/password.txt", []byte("Admin Password: "+password+"\n"))
 			if err != nil {
 				return fmt.Errorf("write 'password.txt' failed: %w", err)
 			}
@@ -207,6 +218,7 @@ func (this *Instance) SetupDB() error {
 			httpConfig.Listen = []*serverconfigs.NetworkAddressConfig{
 				{
 					Protocol:  "http",
+					Host:      "127.0.0.1",
 					PortRange: types.String(this.options.APINode.HTTPPort),
 				},
 			}
@@ -221,6 +233,7 @@ func (this *Instance) SetupDB() error {
 			restHTTPConfig.Listen = []*serverconfigs.NetworkAddressConfig{
 				{
 					Protocol:  "http",
+					Host:      "127.0.0.1",
 					PortRange: types.String(this.options.APINode.RestHTTPPort),
 				},
 			}
@@ -570,7 +583,7 @@ func (this *Instance) SetupAdminNode() error {
 			return err
 		}
 		apiYAMLData = data
-		err = os.WriteFile(this.targetPrefix()+"/edge-admin/configs/api_admin.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-admin/configs/api_admin.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -584,9 +597,9 @@ func (this *Instance) SetupAdminNode() error {
 			var dir = homeDir + "/.edge-admin/"
 			_, err = os.Stat(dir)
 			if err != nil {
-				_ = os.MkdirAll(dir, 0777)
+				_ = securefs.PrivateDir(dir)
 			}
-			_ = os.WriteFile(dir+"/api_admin.yaml", apiYAMLData, 0666)
+			_ = securefs.WriteFile(dir+"/api_admin.yaml", apiYAMLData)
 		}
 	}
 
@@ -606,7 +619,7 @@ func (this *Instance) SetupAdminNode() error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(this.targetPrefix()+"/edge-admin/configs/api_db.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-admin/configs/api_db.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -622,7 +635,7 @@ func (this *Instance) SetupAdminNode() error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(this.targetPrefix()+"/edge-admin/configs/server.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-admin/configs/server.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -666,7 +679,7 @@ func (this *Instance) SetupAPINode() error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(this.targetPrefix()+"/edge-api/configs/api.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-api/configs/api.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -688,7 +701,7 @@ func (this *Instance) SetupAPINode() error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(this.targetPrefix()+"/edge-api/configs/db.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-api/configs/db.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -733,7 +746,7 @@ func (this *Instance) SetupNode() error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(this.targetPrefix()+"/edge-node/configs/api_node.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-node/configs/api_node.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -782,7 +795,7 @@ func (this *Instance) SetupUserNode() error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(this.targetPrefix()+"/edge-user/configs/api_user.yaml", data, 0666)
+		err = securefs.WriteFile(this.targetPrefix()+"/edge-user/configs/api_user.yaml", data)
 		if err != nil {
 			return err
 		}
@@ -869,35 +882,52 @@ func (this *Instance) Startup() error {
 }
 
 func (this *Instance) dbInstance(enableDAO bool) (*dbs.DB, error) {
+	config, err := this.databaseConfig(true)
+	if err != nil {
+		return nil, err
+	}
 	Tea.Env = "prod"
-	db, err := dbs.NewInstanceFromConfig(&dbs.DBConfig{
-		Driver: "mysql",
-		Dsn:    this.options.DB.Username + ":" + this.options.DB.Password + "@tcp(" + this.options.DB.Host + ":" + types.String(this.options.DB.Port) + ")/" + this.options.DB.Name + "?charset=utf8mb4&timeout=30s",
-		Prefix: "edge",
-	})
+	db, err := dbs.NewInstanceFromConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("create database instance failed: %w", err)
 	}
-
 	if enableDAO {
 		this.setupDAO(db)
 	}
-
 	return db, nil
 }
 
 func (this *Instance) dbInstanceWithoutDBName() (*dbs.DB, error) {
+	config, err := this.databaseConfig(false)
+	if err != nil {
+		return nil, err
+	}
 	Tea.Env = "prod"
-	db, err := dbs.NewInstanceFromConfig(&dbs.DBConfig{
-		Driver: "mysql",
-		Dsn:    this.options.DB.Username + ":" + this.options.DB.Password + "@tcp(" + this.options.DB.Host + ":" + types.String(this.options.DB.Port) + ")/?charset=utf8mb4&timeout=30s",
-		Prefix: "edge",
-	})
+	db, err := dbs.NewInstanceFromConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("create database instance failed: %w", err)
 	}
-
 	return db, nil
+}
+
+func (this *Instance) databaseConfig(withDatabase bool) (*dbs.DBConfig, error) {
+	if this.options.DB.Password == "" {
+		return nil, errors.New("an explicit database password is required")
+	}
+	if this.options.DB.Host == "" || this.options.DB.Username == "" || this.options.DB.Name == "" || this.options.DB.Port <= 0 || this.options.DB.Port > 65535 {
+		return nil, errors.New("database host, username, database name and valid port are required")
+	}
+	config := mysql.NewConfig()
+	config.User = this.options.DB.Username
+	config.Passwd = this.options.DB.Password
+	config.Net = "tcp"
+	config.Addr = net.JoinHostPort(this.options.DB.Host, types.String(this.options.DB.Port))
+	config.Timeout = 30 * time.Second
+	config.Params = map[string]string{"charset": "utf8mb4"}
+	if withDatabase {
+		config.DBName = this.options.DB.Name
+	}
+	return &dbs.DBConfig{Driver: "mysql", Dsn: config.FormatDSN(), Prefix: "edge"}, nil
 }
 
 func (this *Instance) setupDAO(db *dbs.DB) {
@@ -1020,7 +1050,7 @@ func (this *Instance) unzip(role string, version string) error {
 	{
 		stat, err := os.Stat(targetPrefix)
 		if err != nil || !stat.IsDir() {
-			err = os.MkdirAll(targetPrefix, 0777)
+			err = securefs.PrivateDir(targetPrefix)
 			if err != nil {
 				return fmt.Errorf("create directory '"+targetPrefix+"' failed: %w", err)
 			}

@@ -4,10 +4,10 @@ import (
 	"time"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/principals"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
-	"github.com/iwind/TeaGo/rands"
 )
 
 const (
@@ -68,15 +68,23 @@ func (this *UserAccessKeyDAO) FindEnabledUserAccessKey(tx *dbs.Tx, id int64) (*U
 
 // CreateAccessKey 创建Key
 func (this *UserAccessKeyDAO) CreateAccessKey(tx *dbs.Tx, adminId int64, userId int64, description string) (int64, error) {
-	if adminId <= 0 && userId <= 0 {
-		return 0, errors.New("invalid adminId or userId")
+	if err := principals.ValidateSubject(adminId, userId); err != nil {
+		return 0, err
+	}
+	uniqueId, err := principals.RandomCredential(16)
+	if err != nil {
+		return 0, err
+	}
+	secret, err := principals.RandomCredential(32)
+	if err != nil {
+		return 0, err
 	}
 	var op = NewUserAccessKeyOperator()
 	op.AdminId = adminId
 	op.UserId = userId
 	op.Description = description
-	op.UniqueId = rands.String(16)
-	op.Secret = rands.String(32)
+	op.UniqueId = uniqueId
+	op.Secret = secret
 	op.IsOn = true
 	op.State = UserAccessKeyStateEnabled
 	return this.SaveInt64(tx, op)

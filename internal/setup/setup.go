@@ -3,13 +3,16 @@ package setup
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/configs"
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
+	"github.com/TeaOSLab/EdgeCommon/pkg/rpcauth"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/cmd"
@@ -23,7 +26,8 @@ type Setup struct {
 	AdminNodeId     string
 	AdminNodeSecret string
 
-	logFp *os.File
+	logFp   *os.File
+	logPath string
 }
 
 func NewSetup(config *Config) *Setup {
@@ -58,9 +62,10 @@ func NewSetupFromCmd() *Setup {
 	// log writer
 	var tmpDir = os.TempDir()
 	if len(tmpDir) > 0 {
-		fp, err := os.OpenFile(tmpDir+"/edge-install.log", os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
+		fp, err := openSetupLog(tmpDir)
 		if err == nil {
 			setup.logFp = fp
+			setup.logPath = filepath.Join(tmpDir, "edge-install.log")
 		}
 	}
 
@@ -68,21 +73,15 @@ func NewSetupFromCmd() *Setup {
 }
 
 func (this *Setup) Run() error {
-	if this.config == nil {
-		return errors.New("config should not be nil")
+	if this.logFp != nil {
+		defer func() {
+			_ = this.logFp.Close()
+			_ = os.Remove(this.logPath)
+		}()
 	}
-
-	if len(this.config.APINodeProtocol) == 0 {
-		return errors.New("api node protocol should not be empty")
-	}
-	if this.config.APINodeProtocol != "http" && this.config.APINodeProtocol != "https" {
-		return errors.New("invalid api node protocol: " + this.config.APINodeProtocol)
-	}
-	if len(this.config.APINodeHost) == 0 {
-		return errors.New("api node host should not be empty")
-	}
-	if this.config.APINodePort <= 0 {
-		return errors.New("api node port should not be less than 1")
+	listen, err := setupListenAddress(this.config)
+	if err != nil {
+		return err
 	}
 
 	// 执行SQL
@@ -108,11 +107,6 @@ func (this *Setup) Run() error {
 	var executor = NewSQLExecutor(dbConfig)
 	if this.logFp != nil {
 		executor.SetLogWriter(this.logFp)
-
-		defer func() {
-			_ = this.logFp.Close()
-			_ = os.Remove(this.logFp.Name())
-		}()
 	}
 	err = executor.Run(false)
 	if err != nil {
@@ -138,12 +132,7 @@ func (this *Setup) Run() error {
 		return err
 	}
 	if apiNodeId == 0 {
-		var addr = &serverconfigs.NetworkAddressConfig{
-			Protocol:  serverconfigs.Protocol(this.config.APINodeProtocol),
-			Host:      this.config.APINodeHost,
-			PortRange: strconv.Itoa(this.config.APINodePort),
-		}
-		addrsJSON, err := json.Marshal([]*serverconfigs.NetworkAddressConfig{addr})
+		addrsJSON, err := json.Marshal([]*serverconfigs.NetworkAddressConfig{listen})
 		if err != nil {
 			return fmt.Errorf("json encode api node addr failed: %w", err)
 		}
@@ -153,12 +142,7 @@ func (this *Setup) Run() error {
 		if this.config.APINodeProtocol == "http" {
 			httpConfig := &serverconfigs.HTTPProtocolConfig{}
 			httpConfig.IsOn = true
-			httpConfig.Listen = []*serverconfigs.NetworkAddressConfig{
-				{
-					Protocol:  "http",
-					PortRange: strconv.Itoa(this.config.APINodePort),
-				},
-			}
+			httpConfig.Listen = []*serverconfigs.NetworkAddressConfig{listen}
 			httpJSON, err = json.Marshal(httpConfig)
 			if err != nil {
 				return fmt.Errorf("json encode api node http config failed: %w", err)
@@ -168,12 +152,7 @@ func (this *Setup) Run() error {
 			// TODO 如果在安装过程中开启了HTTPS，需要同时上传SSL证书
 			var httpsConfig = &serverconfigs.HTTPSProtocolConfig{}
 			httpsConfig.IsOn = true
-			httpsConfig.Listen = []*serverconfigs.NetworkAddressConfig{
-				{
-					Protocol:  "https",
-					PortRange: strconv.Itoa(this.config.APINodePort),
-				},
-			}
+			httpsConfig.Listen = []*serverconfigs.NetworkAddressConfig{listen}
 			httpsJSON, err = json.Marshal(httpsConfig)
 			if err != nil {
 				return fmt.Errorf("json encode api node https config failed: %w", err)
@@ -207,4 +186,45 @@ func (this *Setup) Run() error {
 	}
 
 	return nil
+}
+
+// Publish a newly created 0600 log inode at the Admin reader's stable path.
+// Rename replaces a pre-existing symlink/hardlink entry without truncating its
+// target; opening that predictable filename with O_TRUNC would follow the link.
+func openSetupLog(tmpDir string) (*os.File, error) {
+	file, err := os.CreateTemp(tmpDir, ".edge-install-*.log")
+	if err != nil {
+		return nil, err
+	}
+	name := file.Name()
+	if err := os.Rename(name, filepath.Join(tmpDir, "edge-install.log")); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return nil, err
+	}
+	return file, nil
+}
+
+// The installation address controls both the advertised endpoint and its bind
+// address. In particular, a loopback API must not listen on every interface.
+func setupListenAddress(config *Config) (*serverconfigs.NetworkAddressConfig, error) {
+	if config == nil {
+		return nil, errors.New("config should not be nil")
+	}
+	if config.APINodeProtocol != "http" && config.APINodeProtocol != "https" {
+		return nil, errors.New("api node protocol must be http or https")
+	}
+	if config.APINodeHost == "" {
+		return nil, errors.New("api node host should not be empty")
+	}
+	if config.APINodePort <= 0 || config.APINodePort > 65535 {
+		return nil, errors.New("api node port must be between 1 and 65535")
+	}
+	if config.APINodeProtocol == "http" && !rpcauth.PlaintextAllowed(net.JoinHostPort(config.APINodeHost, strconv.Itoa(config.APINodePort))) {
+		return nil, errors.New("plaintext API installation requires explicit migration mode or a literal loopback address in loopback-only mode")
+	}
+	return &serverconfigs.NetworkAddressConfig{
+		Protocol: serverconfigs.Protocol(config.APINodeProtocol), Host: config.APINodeHost,
+		PortRange: strconv.Itoa(config.APINodePort),
+	}, nil
 }

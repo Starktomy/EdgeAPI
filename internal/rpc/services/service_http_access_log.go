@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"math"
 	"sync"
+	"time"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
@@ -11,6 +13,9 @@ import (
 	"github.com/TeaOSLab/EdgeCommon/pkg/rpc/pb"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // HTTPAccessLogService 访问日志相关服务
@@ -21,19 +26,43 @@ type HTTPAccessLogService struct {
 // CreateHTTPAccessLogs 创建访问日志
 func (this *HTTPAccessLogService) CreateHTTPAccessLogs(ctx context.Context, req *pb.CreateHTTPAccessLogsRequest) (*pb.CreateHTTPAccessLogsResponse, error) {
 	// 校验请求
-	_, _, _, err := rpcutils.ValidateRequest(ctx, rpcutils.UserTypeNode)
+	_, _, nodeId, err := rpcutils.ValidateRequest(ctx, rpcutils.UserTypeNode)
 	if err != nil {
 		return nil, err
 	}
 
+	if req == nil || len(req.HttpAccessLogs) > 2000 || proto.Size(req) > 8<<20 {
+		return nil, status.Error(codes.InvalidArgument, "access log batch exceeds 2000 records or 8 MiB")
+	}
 	if len(req.HttpAccessLogs) == 0 {
 		return &pb.CreateHTTPAccessLogsResponse{}, nil
 	}
 
-	var tx = this.NullTx()
+	scope, err := loadTelemetryScope(this.NullTx(), nodeId)
+	if err != nil {
+		return nil, err
+	}
+	// Do not mutate the sender's retry payload while normalizing storage fields.
+	req = proto.Clone(req).(*pb.CreateHTTPAccessLogsRequest)
+	for _, accessLog := range req.HttpAccessLogs {
+		if accessLog == nil || accessLog.NodeId != nodeId || accessLog.ServerId < 0 {
+			return nil, this.PermissionError()
+		}
+		if accessLog.Timestamp < 1577836800 || accessLog.Timestamp > time.Now().Unix()+300 ||
+			accessLog.BytesSent < 0 || accessLog.BodyBytesSent < 0 || accessLog.RequestLength < 0 ||
+			math.IsNaN(accessLog.RequestTime) || math.IsInf(accessLog.RequestTime, 0) || accessLog.RequestTime < 0 {
+			return nil, status.Error(codes.InvalidArgument, "invalid access log values")
+		}
+		if accessLog.ServerId > 0 {
+			if _, err := scope.server(this.NullTx(), accessLog.ServerId); err != nil {
+				return nil, err
+			}
+		}
+		accessLog.TimeISO8601 = time.Unix(accessLog.Timestamp, 0).Format(time.RFC3339)
+	}
 
 	if this.canWriteAccessLogsToDB() {
-		err = models.SharedHTTPAccessLogDAO.CreateHTTPAccessLogs(tx, req.HttpAccessLogs)
+		err = models.SharedHTTPAccessLogDAO.PersistHTTPAccessLogs(req.HttpAccessLogs)
 		if err != nil {
 			return nil, err
 		}

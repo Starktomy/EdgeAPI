@@ -17,5 +17,5 @@ const (
 
 	// 其他节点版本号，用来检测是否有需要升级的节点
 
-	NodeVersion = "1.4.0"
+	NodeVersion = "1.4.1"
 )

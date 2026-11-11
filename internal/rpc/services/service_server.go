@@ -43,6 +43,12 @@ func (this *ServerService) CreateServer(ctx context.Context, req *pb.CreateServe
 		req.UserId = userId
 	}
 
+	if userId > 0 && req.WebId > 0 {
+		if err := models.SharedHTTPWebDAO.CheckUserWeb(tx, userId, req.WebId); err != nil {
+			return nil, err
+		}
+	}
+
 	// 修复一个单词拼写错误
 	if len(req.ServerNamesJON) > 0 && len(req.ServerNamesJSON) == 0 {
 		req.ServerNamesJSON = req.ServerNamesJON
@@ -201,13 +207,22 @@ func (this *ServerService) CreateServer(ctx context.Context, req *pb.CreateServe
 
 // CreateBasicHTTPServer 快速创建基本的HTTP网站
 func (this *ServerService) CreateBasicHTTPServer(ctx context.Context, req *pb.CreateBasicHTTPServerRequest) (*pb.CreateBasicHTTPServerResponse, error) {
+	var response *pb.CreateBasicHTTPServerResponse
+	err := this.RunTx(func(tx *dbs.Tx) error {
+		var err error
+		response, err = this.createBasicHTTPServer(ctx, req, tx)
+		return err
+	})
+	return response, err
+}
+
+func (this *ServerService) createBasicHTTPServer(ctx context.Context, req *pb.CreateBasicHTTPServerRequest, tx *dbs.Tx) (*pb.CreateBasicHTTPServerResponse, error) {
 	adminId, userId, err := this.ValidateAdminAndUser(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
 	// 集群
-	var tx = this.NullTx()
 	if userId > 0 {
 		req.UserId = userId
 
@@ -1167,8 +1182,11 @@ func (this *ServerService) UpdateServerWeb(ctx context.Context, req *pb.UpdateSe
 	var tx = this.NullTx()
 
 	if userId > 0 {
-		err = models.SharedServerDAO.CheckUserServer(tx, userId, req.ServerId)
+		err = this.authorizer().CheckUserServer(userId, req.ServerId)
 		if err != nil {
+			return nil, err
+		}
+		if err = this.authorizer().CheckUserWeb(userId, req.WebId); err != nil {
 			return nil, err
 		}
 	}

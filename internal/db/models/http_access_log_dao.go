@@ -190,9 +190,7 @@ func (this *HTTPAccessLogDAO) DumpAccessLogsFromQueue(size int) (hasMore bool, e
 	if err != nil {
 		return false, err
 	}
-	defer func() {
-		_ = tx.Commit()
-	}()
+	defer tx.Rollback()
 
 	// 复制变量，防止中途改变
 	var oldQueue = oldAccessLogQueue
@@ -228,6 +226,9 @@ Loop:
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return hasMore, err
+	}
 	return hasMore, nil
 }
 

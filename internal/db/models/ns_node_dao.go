@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/utils"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
-	"github.com/iwind/TeaGo/rands"
 )
 
 const (
@@ -117,7 +117,10 @@ func (this *NSNodeDAO) FindEnabledNodeIdWithUniqueId(tx *dbs.Tx, uniqueId string
 // GenUniqueId 生成唯一ID
 func (this *NSNodeDAO) GenUniqueId(tx *dbs.Tx) (string, error) {
 	for {
-		uniqueId := rands.HexString(32)
+		uniqueId, err := cryptoutils.RandomHex(32)
+		if err != nil {
+			return "", err
+		}
 		ok, err := this.Query(tx).
 			Attr("uniqueId", uniqueId).
 			Exist()
@@ -173,7 +176,7 @@ func (this *NSNodeDAO) CountAllLowerVersionNodes(tx *dbs.Tx, version string) (in
 
 // FindNodeClusterId 获取节点的集群ID
 func (this *NSNodeDAO) FindNodeClusterId(tx *dbs.Tx, nodeId int64) (int64, error) {
-	return this.Query(tx).
+	return this.Query(tx).Reuse(false).
 		Pk(nodeId).
 		Result("clusterId").
 		FindInt64Col(0)

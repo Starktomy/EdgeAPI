@@ -14,14 +14,21 @@ type UserAccessKeyService struct {
 
 // CreateUserAccessKey 创建AccessKey
 func (this *UserAccessKeyService) CreateUserAccessKey(ctx context.Context, req *pb.CreateUserAccessKeyRequest) (*pb.CreateUserAccessKeyResponse, error) {
-	_, userId, err := this.ValidateAdminAndUser(ctx, true)
+	adminId, userId, err := this.ValidateAdminAndUser(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
 	var tx = this.NullTx()
 	if userId > 0 {
+		if req.AdminId != 0 {
+			return nil, this.PermissionError()
+		}
 		req.UserId = userId
+	} else if req.UserId > 0 || req.AdminId != adminId {
+		if _, err = this.ValidateSuperAdmin(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	userAccessKeyId, err := models.SharedUserAccessKeyDAO.CreateAccessKey(tx, req.AdminId, req.UserId, req.Description)
@@ -33,14 +40,19 @@ func (this *UserAccessKeyService) CreateUserAccessKey(ctx context.Context, req *
 
 // FindAllEnabledUserAccessKeys 查找所有的AccessKey
 func (this *UserAccessKeyService) FindAllEnabledUserAccessKeys(ctx context.Context, req *pb.FindAllEnabledUserAccessKeysRequest) (*pb.FindAllEnabledUserAccessKeysResponse, error) {
-	_, userId, err := this.ValidateAdminAndUser(ctx, true)
+	adminId, userId, err := this.ValidateAdminAndUser(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
 	var tx = this.NullTx()
 	if userId > 0 {
+		req.AdminId = 0
 		req.UserId = userId
+	} else if req.UserId > 0 || req.AdminId != adminId {
+		if _, err = this.ValidateSuperAdmin(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	accessKeys, err := models.SharedUserAccessKeyDAO.FindAllEnabledAccessKeys(tx, req.AdminId, req.UserId)
@@ -126,6 +138,7 @@ func (this *UserAccessKeyService) CountAllEnabledUserAccessKeys(ctx context.Cont
 
 	var tx = this.NullTx()
 	if userId > 0 {
+		req.AdminId = 0
 		req.UserId = userId
 	}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models/stats"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
+	"github.com/TeaOSLab/EdgeAPI/internal/utils/cryptoutils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs/firewallconfigs"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs/shared"
@@ -17,7 +18,6 @@ import (
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
 	"github.com/iwind/TeaGo/maps"
-	"github.com/iwind/TeaGo/rands"
 	"github.com/iwind/TeaGo/types"
 )
 
@@ -211,8 +211,14 @@ func upgradeV0_0_6(db *dbs.DB) error {
 		return nil
 	}
 
-	nodeId := rands.HexString(32)
-	secret := rands.String(32)
+	nodeId, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
+	secret, err := cryptoutils.RandomHex(32)
+	if err != nil {
+		return err
+	}
 	_, err = db.Exec("INSERT INTO edgeAPITokens (nodeId, secret, role) VALUES (?, ?, ?)", nodeId, secret, "user")
 	if err != nil {
 		return err

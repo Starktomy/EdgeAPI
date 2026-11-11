@@ -2,10 +2,10 @@ package tasks
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,13 +15,13 @@ import (
 	"github.com/TeaOSLab/EdgeAPI/internal/db/models"
 	"github.com/TeaOSLab/EdgeAPI/internal/errors"
 	"github.com/TeaOSLab/EdgeCommon/pkg/configutils"
+	"github.com/TeaOSLab/EdgeCommon/pkg/healthcheck"
 	"github.com/TeaOSLab/EdgeCommon/pkg/iputils"
 	"github.com/TeaOSLab/EdgeCommon/pkg/nodeconfigs"
-	"github.com/TeaOSLab/EdgeCommon/pkg/nodeutils"
+	"github.com/TeaOSLab/EdgeCommon/pkg/rpcauth"
 	"github.com/TeaOSLab/EdgeCommon/pkg/serverconfigs"
 	"github.com/iwind/TeaGo/dbs"
 	"github.com/iwind/TeaGo/lists"
-	"github.com/iwind/TeaGo/maps"
 	"github.com/iwind/TeaGo/types"
 	timeutil "github.com/iwind/TeaGo/utils/time"
 )
@@ -264,11 +264,12 @@ func (this *HealthCheckExecutor) runNodeOnce(healthCheckConfig *serverconfigs.He
 		result.NodeAddr = configutils.QuoteIP(result.NodeAddr)
 	}
 
-	if len(healthCheckConfig.URL) == 0 {
-		healthCheckConfig.URL = "http://${host}/"
+	probeURL := healthCheckConfig.URL
+	if len(probeURL) == 0 {
+		probeURL = "http://${host}/"
 	}
 
-	var url = strings.ReplaceAll(healthCheckConfig.URL, "${host}", result.NodeAddr)
+	var url = strings.ReplaceAll(probeURL, "${host}", result.NodeAddr)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -280,10 +281,7 @@ func (this *HealthCheckExecutor) runNodeOnce(healthCheckConfig *serverconfigs.He
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36")
 	}
 
-	key, err := nodeutils.Base64EncodeMap(maps.Map{
-		"onlyBasicRequest": healthCheckConfig.OnlyBasicRequest,
-		"accessLogIsOn":    healthCheckConfig.AccessLogIsOn,
-	})
+	key, err := healthcheck.Sign(result.Node.UniqueId, result.Node.Secret, req, healthCheckConfig.OnlyBasicRequest, healthCheckConfig.AccessLogIsOn)
 	if err != nil {
 		return err
 	}
@@ -292,6 +290,13 @@ func (this *HealthCheckExecutor) runNodeOnce(healthCheckConfig *serverconfigs.He
 	var timeout = 5 * time.Second
 	if healthCheckConfig.Timeout != nil {
 		timeout = healthCheckConfig.Timeout.Duration()
+	}
+	if timeout <= 0 || timeout > 30*time.Second {
+		timeout = 5 * time.Second
+	}
+	tlsConfig, err := rpcauth.VerifiedTLSConfig(req.URL.Hostname(), os.Getenv("EDGE_HEALTHCHECK_CA_FILE"))
+	if err != nil {
+		return err
 	}
 
 	var client = &http.Client{
@@ -302,18 +307,19 @@ func (this *HealthCheckExecutor) runNodeOnce(healthCheckConfig *serverconfigs.He
 				if err != nil {
 					return nil, err
 				}
-				return net.DialTimeout(network, configutils.QuoteIP(result.NodeAddr)+":"+port, timeout)
+				return (&net.Dialer{Timeout: timeout}).DialContext(ctx, network, configutils.QuoteIP(strings.Trim(result.NodeAddr, "[]"))+":"+port)
 			},
 			MaxIdleConns:          3,
 			MaxIdleConnsPerHost:   3,
 			MaxConnsPerHost:       3,
 			IdleConnTimeout:       10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-			TLSHandshakeTimeout:   0,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
+			TLSHandshakeTimeout:   timeout,
+			TLSClientConfig:       tlsConfig,
 		},
+		// The signed probe is scoped to one node, host and URI. A redirect is
+		// observed as its configured status, never forwarded with credentials.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	defer func() {
 		client.CloseIdleConnections()

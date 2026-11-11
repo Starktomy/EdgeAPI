@@ -60,7 +60,9 @@ func (this *HTTPHeaderService) UpdateHTTPHeader(ctx context.Context, req *pb.Upd
 	}
 
 	if userId > 0 {
-		// TODO 检查用户权限
+		if err = this.authorizer().CheckUserHeader(userId, req.HeaderId); err != nil {
+			return nil, err
+		}
 	}
 
 	var tx = this.NullTx()
@@ -97,7 +99,9 @@ func (this *HTTPHeaderService) FindEnabledHTTPHeaderConfig(ctx context.Context, 
 	}
 
 	if userId > 0 {
-		// TODO 检查用户权限
+		if err = this.authorizer().CheckUserHeader(userId, req.HeaderId); err != nil {
+			return nil, err
+		}
 	}
 
 	var tx = this.NullTx()

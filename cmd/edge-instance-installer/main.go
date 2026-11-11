@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/TeaOSLab/EdgeAPI/internal/instances"
+	"github.com/TeaOSLab/EdgeCommon/pkg/rpcauth"
 	_ "github.com/iwind/TeaGo/bootstrap"
 	"github.com/iwind/TeaGo/lists"
 )
@@ -15,32 +16,17 @@ import (
 func main() {
 	var verbose = lists.ContainsString(os.Args, "-v")
 
-	var dbHost = "127.0.0.1"
-	var dbPassword = "123456"
-	var dbName = "edges"
-
-	envDBHost, _ := os.LookupEnv("EDGE_DB_HOST")
-	if len(envDBHost) > 0 {
-		dbHost = envDBHost
-		if verbose {
-			log.Println("env EDGE_DB_HOST=" + envDBHost)
-		}
+	database, err := databaseSettingsFromEnv(os.LookupEnv)
+	if err != nil {
+		log.Print(err)
+		os.Exit(2)
 	}
-
-	envDBPassword, _ := os.LookupEnv("EDGE_DB_PASSWORD")
-	if len(envDBPassword) > 0 {
-		dbPassword = envDBPassword
-		if verbose {
-			log.Println("env EDGE_DB_PASSWORD=" + envDBPassword)
-		}
+	if !rpcauth.PlaintextAllowed("127.0.0.1") {
+		log.Print("local instance installation requires EDGE_ALLOW_LOOPBACK_RPC=true, or explicitly configured verified TLS endpoints")
+		os.Exit(2)
 	}
-
-	envDBName, _ := os.LookupEnv("EDGE_DB_NAME")
-	if len(envDBName) > 0 {
-		dbName = envDBName
-		if verbose {
-			log.Println("env EDGE_DB_NAME=" + envDBName)
-		}
+	if verbose {
+		database.log(log.Default())
 	}
 
 	var isTesting = lists.ContainsString(os.Args, "-test") || lists.ContainsString(os.Args, "--test")
@@ -61,11 +47,11 @@ func main() {
 			Password string
 			Name     string
 		}{
-			Host:     dbHost,
+			Host:     database.Host,
 			Port:     3306,
 			Username: "root",
-			Password: dbPassword,
-			Name:     dbName,
+			Password: database.Password,
+			Name:     database.Name,
 		},
 		AdminNode: struct {
 			Port int
@@ -88,11 +74,39 @@ func main() {
 			HTTPPort: 7799,
 		},
 	})
-	err := instance.SetupAll()
+	err = instance.SetupAll()
 	if err != nil {
 		fmt.Println("[ERROR]setup failed: " + err.Error())
-		return
+		os.Exit(1)
 	}
 
 	fmt.Println("ok")
+}
+
+type databaseSettings struct {
+	Host     string
+	Name     string
+	Password string
+}
+
+func databaseSettingsFromEnv(lookup func(string) (string, bool)) (databaseSettings, error) {
+	config := databaseSettings{Host: "127.0.0.1", Name: "edges"}
+	if host, _ := lookup("EDGE_DB_HOST"); host != "" {
+		config.Host = host
+	}
+	if name, _ := lookup("EDGE_DB_NAME"); name != "" {
+		config.Name = name
+	}
+	password, set := lookup("EDGE_DB_PASSWORD")
+	if !set || password == "" {
+		return databaseSettings{}, fmt.Errorf("EDGE_DB_PASSWORD must be explicitly set to a nonempty database password")
+	}
+	config.Password = password
+	return config, nil
+}
+
+func (config databaseSettings) log(logger *log.Logger) {
+	logger.Print("env EDGE_DB_HOST=" + config.Host)
+	logger.Print("env EDGE_DB_NAME=" + config.Name)
+	logger.Print("env EDGE_DB_PASSWORD=[redacted]")
 }

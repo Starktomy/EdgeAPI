@@ -8,7 +8,7 @@ import (
 
 	"github.com/iwind/TeaGo/Tea"
 	"github.com/iwind/TeaGo/dbs"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 func LoadDBConfig() (*dbs.Config, error) {

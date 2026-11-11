@@ -12,8 +12,6 @@ const (
 	ApiTokenStateDisabled = 0 // 已禁用
 )
 
-var apiTokenCacheMap = map[string]*ApiToken{} // uniqueId => ApiToken
-
 type ApiTokenDAO dbs.DAO
 
 func NewApiTokenDAO() *ApiTokenDAO {
@@ -63,27 +61,10 @@ func (this *ApiTokenDAO) FindEnabledApiToken(tx *dbs.Tx, id uint32) (*ApiToken, 
 	return result.(*ApiToken), err
 }
 
-// FindEnabledTokenWithNodeCacheable 获取可缓存的节点Token信息
+// FindEnabledTokenWithNodeCacheable retains the old API, but credentials are
+// read authoritatively so revocation and key rotation apply across API nodes.
 func (this *ApiTokenDAO) FindEnabledTokenWithNodeCacheable(tx *dbs.Tx, nodeId string) (*ApiToken, error) {
-	SharedCacheLocker.RLock()
-	token, ok := apiTokenCacheMap[nodeId]
-	if ok {
-		SharedCacheLocker.RUnlock()
-		return token, nil
-	}
-	SharedCacheLocker.RUnlock()
-	one, err := this.Query(tx).
-		Attr("nodeId", nodeId).
-		State(ApiTokenStateEnabled).
-		Find()
-	if one != nil {
-		token = one.(*ApiToken)
-		SharedCacheLocker.Lock()
-		apiTokenCacheMap[nodeId] = token
-		SharedCacheLocker.Unlock()
-		return token, nil
-	}
-	return nil, err
+	return this.FindEnabledTokenWithNode(tx, nodeId)
 }
 
 // FindEnabledTokenWithNode 获取节点Token信息并可以缓存
